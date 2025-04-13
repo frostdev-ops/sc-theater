@@ -1,0 +1,34 @@
+{
+  "name": "synchronized-video-viewer",
+  "version": "1.0.0",
+  "description": "Web application that allows an admin to control video playback across multiple viewer clients",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-video.js && echo '\n' && echo 'Now run test-client.js separately to test WebSocket functionality'",
+    "test:video": "node test-video.js",
+    "test:client": "node test-client.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "keywords": [
+    "video",
+    "synchronization",
+    "websocket",
+    "streaming"
+  ],
+  "author": "",
+  "license": "MIT"
+}

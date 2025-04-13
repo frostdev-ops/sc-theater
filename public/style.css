@@ -1,0 +1,559 @@
+/* Global Styles */
+:root {
+    --bg-color: #0d0d0d; /* Very dark grey, almost black */
+    --container-bg: #1a1a1a; /* Dark grey for containers */
+    --input-bg: #2c2c2c; /* Slightly lighter grey for inputs */
+    --border-color: #444; /* Border color */
+    --text-primary: #e0e0e0; /* Light grey for primary text */
+    --text-secondary: #aaaaaa; /* Dimmer grey for secondary text */
+    --glow-color: #E6E6FA; /* Lavender glow/accent */
+    --primary-start: #87CEFA; /* Light Sky Blue */
+    --primary-end: #4682B4; /* Steel Blue */
+    --secondary-start: #9370DB; /* Medium Purple */
+    --secondary-end: #FFB6C1; /* Light Pink */
+    --error-color: #FF6B6B; /* Error red */
+    --success-color: #90EE90; /* Success green */
+    --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-main);
+    line-height: 1.6;
+    color: var(--text-primary);
+    background-color: var(--bg-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 1rem; /* Add padding for smaller screens */
+}
+
+.container {
+    background-color: var(--container-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    /* Removed box-shadow, use border for definition */
+    padding: 2rem;
+    width: 100%;
+    max-width: 900px;
+    transition: all 0.3s ease;
+}
+
+.hidden {
+    display: none;
+}
+
+h1 {
+    /* Gradient text effect */
+    background: linear-gradient(to bottom, var(--primary-start), var(--primary-end));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent; /* Fallback or use text-fill-color */
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    font-weight: 700; /* Make title bolder */
+}
+
+h2 {
+    /* Gradient text effect */
+    background: linear-gradient(to right, var(--secondary-start), var(--secondary-end));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent; /* Fallback or use text-fill-color */
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+
+h3 {
+    color: var(--primary-start); /* Use primary start color for H3 */
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+h4 {
+    color: var(--secondary-start); /* Use secondary start color for H4 */
+    margin: 1rem 0 0.5rem 0;
+    font-size: 0.95rem;
+}
+
+button {
+    background: linear-gradient(to right, var(--secondary-start), var(--secondary-end));
+    color: var(--bg-color); /* Dark text on light gradient */
+    border: none;
+    border-radius: 4px;
+    padding: 0.7rem 1.4rem; /* Slightly larger padding */
+    font-size: 1rem;
+    font-weight: 600; /* Bolder button text */
+    cursor: pointer;
+    transition: filter 0.2s, transform 0.1s;
+}
+
+button:hover {
+    filter: brightness(1.1); /* Slightly brighten on hover */
+}
+
+button:active {
+    transform: scale(0.98); /* Press effect */
+}
+
+button:disabled {
+    background: var(--border-color);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+}
+
+/* Authentication Screen */
+.auth-form {
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    background-color: var(--container-bg); /* Match container background */
+    border: 1px solid var(--border-color); /* Add subtle border */
+    border-radius: 6px;
+}
+
+.input-group, .radio-group {
+    margin-bottom: 1.2rem;
+}
+
+.input-group label, .radio-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--text-secondary); /* Lighter label color */
+}
+
+input[type="password"],
+input[type="text"],
+input[type="number"],
+select {
+    width: 100%;
+    padding: 0.8rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-size: 1rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--glow-color);
+    box-shadow: 0 0 0 2px rgba(230, 230, 250, 0.3); /* Subtle glow effect */
+}
+
+/* Style select dropdown arrow */
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23aaa%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 0.8em;
+    padding-right: 2.5rem; /* Make space for arrow */
+}
+
+.radio-group {
+    display: flex;
+    justify-content: space-around;
+    margin: 1rem 0;
+    color: var(--text-secondary);
+}
+
+.radio-group label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.radio-group input[type="radio"] {
+    margin-right: 0.5rem;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 1.2em;
+    height: 1.2em;
+    border: 2px solid var(--glow-color);
+    border-radius: 50%;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.radio-group input[type="radio"]:checked {
+    background-color: var(--glow-color);
+}
+
+.radio-group input[type="radio"]:checked::after {
+    content: '';
+    display: block;
+    width: 0.6em;
+    height: 0.6em;
+    background-color: var(--container-bg);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.error-message {
+    color: var(--error-color);
+    margin-top: 1rem;
+    text-align: center;
+    font-weight: 500;
+    min-height: 1.5rem;
+}
+
+/* Main Application */
+#app-container {
+    padding: 1.5rem;
+    width: 100%; /* Allow container to resize */
+    max-width: 900px; /* Default max width */
+    transition: max-width 0.4s ease; /* Smooth transition */
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color); /* Use theme border color */
+}
+
+.header h1 { margin-bottom: 0; } /* Remove extra margin from header h1 */
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+#status-icon {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--success-color); /* Use success green */
+    margin-right: 8px;
+    box-shadow: 0 0 5px var(--success-color); /* Add glow */
+}
+
+#connection-text {
+    color: var(--text-secondary);
+}
+
+#role-text {
+    font-weight: 600;
+    color: var(--glow-color); /* Use glow color for role */
+}
+
+/* Video Player */
+.video-container {
+    width: 100%;
+    margin-bottom: 1.5rem;
+    /* position: relative; /* REMOVED - No longer needed here */ */
+}
+
+/* Wrapper for the video player and its overlay */
+.video-player-wrapper {
+    position: relative; /* This will contain the absolutely positioned overlay */
+    width: 100%;
+    line-height: 0; /* Prevent extra space below video */
+}
+
+#video-player {
+    width: 100%;
+    background-color: #000; /* Keep video background black */
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border-color); /* Add subtle border */
+}
+
+/* Video Overlay for Paused State */
+#video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('/images/Asset_18scaprlogoed.png'); /* Adjust path if needed */
+    background-size: contain; /* Or cover, depending on desired look */
+    background-position: center;
+    background-repeat: no-repeat;
+    background-color: rgba(0, 0, 0, 0.8); /* Dark semi-transparent background */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    pointer-events: none; /* Allow clicks to pass through */
+    border-radius: 6px; /* Match video player border radius */
+}
+
+/* Show overlay when container has .paused-state */
+.video-container.paused-state #video-overlay {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Controls */
+.controls {
+    padding: 1.5rem; /* More padding */
+    background-color: rgba(0,0,0, 0.2); /* Slightly transparent dark background */
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-top: 1rem;
+}
+
+.control-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    align-items: center; /* Align items vertically */
+}
+
+.seek-control {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    width: 100%; /* Ensure it takes full width */
+}
+
+.seek-control label {
+    margin-right: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap; /* Prevent label wrapping */
+}
+
+input[type="range"] {
+    flex-grow: 1;
+    height: 8px;
+    background: var(--input-bg);
+    border-radius: 5px;
+    appearance: none;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--glow-color);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(230, 230, 250, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--glow-color);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 4px rgba(230, 230, 250, 0.5);
+}
+
+#time-display {
+    font-family: monospace;
+    color: var(--text-secondary);
+    margin-left: 1rem; /* Space between slider and time */
+    min-width: 90px; /* Ensure space for time */
+    text-align: right;
+}
+
+.video-select {
+    display: flex;
+    align-items: center;
+    width: 100%; /* Take full width */
+}
+
+.video-select label {
+    margin-right: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+#video-list {
+    flex-grow: 1;
+}
+
+/* Status Messages */
+.status-message {
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+    min-height: 1.5rem;
+    margin-top: 1rem;
+}
+
+/* Encoding Controls */
+.encoding-controls {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background-color: var(--container-bg); /* Match container background */
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.encode-form {
+    display: flex;
+    flex-direction: column; /* Stack inputs vertically */
+    gap: 1rem; /* Add gap between rows */
+}
+
+.encoding-options {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Make encoding options input groups stack better */
+.encoding-options .input-group {
+    margin-bottom: 0.8rem;
+}
+
+.button-group {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-wrap: wrap; /* Allow buttons to wrap */
+    gap: 1rem;
+    justify-content: center; /* Center buttons */
+}
+
+.encoding-status {
+    margin-top: 1.5rem;
+    text-align: center;
+    font-weight: 500;
+    min-height: 1.5rem;
+    color: var(--text-secondary);
+}
+
+/* Specific Button Colors for Encoding */
+#encode-mp4-btn {
+    background: linear-gradient(to right, var(--primary-start), var(--primary-end));
+    color: var(--bg-color);
+}
+#create-hls-btn {
+    background: linear-gradient(to right, var(--secondary-start), var(--secondary-end));
+    color: var(--bg-color);
+}
+#create-thumbnail-btn {
+    background: var(--glow-color);
+    color: var(--bg-color);
+}
+
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+    .header {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.3rem; }
+
+    .encode-form {
+        padding: 0;
+    }
+    .encoding-options .input-group {
+        flex-basis: 100%;
+    }
+    .encoding-options .input-group label {
+        font-size: 0.9rem;
+    }
+    .encoding-options .input-group input,
+    .encoding-options .input-group select {
+        padding: 0.6rem;
+        font-size: 0.9rem;
+    }
+    .button-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .button-group button {
+        width: 100%;
+    }
+}
+
+/* Center the form elements */
+#password-form {
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center items horizontally */
+}
+
+.input-group, .radio-group {
+    margin-bottom: 1.2rem;
+    width: 100%; /* Ensure input group takes full width */
+}
+
+/* Specific styling for the button within the form */
+#password-form button[type="submit"] {
+    margin-top: 1rem; /* Add some space above the button */
+    width: auto; /* Allow button to size based on content */
+    padding: 0.7rem 2rem; /* Adjust padding as needed */
+}
+
+.input-group label, .radio-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--text-secondary); /* Lighter label color */
+}
+
+/* Theater Mode Styling */
+body.theater-mode #app-container {
+    max-width: 1400px; /* Set a larger max-width */
+    width: 90vw; /* Take up 90% of viewport width */
+}
+
+body.theater-mode .header {
+    /* Optionally hide header or make smaller in theater mode */
+    /* padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem; */
+}
+
+body.theater-mode .controls {
+    /* Optionally adjust controls in theater mode */
+     margin-top: 0.5rem;
+    padding: 1rem;
+}
+
+/* Style the theater mode button */
+.header-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 0.4rem 0.6rem;
+    margin-left: 1rem; /* Space from connection status */
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.header-btn:hover {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+}
+
+.header-btn svg {
+    vertical-align: middle;
+}
