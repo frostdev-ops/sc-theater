@@ -16,6 +16,10 @@
             <h2>Enter Password</h2>
             <form id="password-form">
                 <div class="input-group">
+                    <label for="username">Your Name:</label>
+                    <input type="text" id="username" required placeholder="Enter your name">
+                </div>
+                <div class="input-group">
                     <label for="password">Password:</label>
                     <input type="password" id="password" required>
                 </div>
@@ -32,13 +36,22 @@
                 <span id="status-icon"></span>
                 <span id="connection-text">Connected as <span id="role-text"></span></span>
             </div>
-            <!-- Added Theater Mode Button -->
-            <button id="theater-mode-btn" class="header-btn" title="Toggle Theater Mode">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                    <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 7h14v10H5z"/>
-                    <path d="M0 0h24v24H0z" fill="none"/>
-                </svg>
-            </button>
+            <div class="header-controls">
+                <!-- Added Theater Mode Button -->
+                <button id="theater-mode-btn" class="header-btn" title="Toggle Theater Mode">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                        <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 7h14v10H5z"/>
+                        <path d="M0 0h24v24H0z" fill="none"/>
+                    </svg>
+                </button>
+                <!-- Added Logout Button -->
+                <button id="logout-btn" class="header-btn" title="Logout">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                        <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+                        <path d="M0 0h24v24H0z" fill="none"/>
+                    </svg>
+                </button>
+            </div>
             <h1>Shadow Company</h1>
         </div>
 
@@ -65,6 +78,27 @@
                 <div class="video-select">
                     <label for="video-list">Select Video:</label>
                     <select id="video-list"></select>
+                </div>
+                
+                <!-- Add connected viewers section (admin only) -->
+                <div class="connected-viewers-section">
+                    <h3>Connected Viewers (<span id="viewer-count">0</span>)</h3>
+                    <p id="server-time-display">Server Time: 0:00</p>
+                    <div class="viewers-table-container">
+                        <table id="viewers-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>IP Address</th>
+                                    <th>Current Time</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="viewers-list">
+                                <!-- Viewers will be added here dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

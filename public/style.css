@@ -537,13 +537,18 @@ body.theater-mode .controls {
     padding: 1rem;
 }
 
-/* Style the theater mode button */
+/* Style the header controls group */
+.header-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Style the theater mode button and logout button */
 .header-btn {
     background: none;
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
     padding: 0.4rem 0.6rem;
-    margin-left: 1rem; /* Space from connection status */
     cursor: pointer;
     border-radius: 4px;
     transition: background-color 0.2s, color 0.2s;
@@ -556,4 +561,130 @@ body.theater-mode .controls {
 
 .header-btn svg {
     vertical-align: middle;
+}
+
+/* Style specific buttons */
+#logout-btn {
+    color: var(--error-color);
+    border-color: var(--error-color);
+}
+
+#logout-btn:hover {
+    background-color: rgba(255, 107, 107, 0.1);
+}
+
+/* Connected Viewers Section */
+.connected-viewers-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.connected-viewers-section h3 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#viewer-count {
+    background-color: var(--secondary-start);
+    color: var(--bg-color);
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+#server-time-display {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    font-family: monospace;
+    background-color: rgba(0, 0, 0, 0.2);
+    padding: 0.4rem;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.viewers-table-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-top: 0.5rem;
+}
+
+#viewers-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+#viewers-table th,
+#viewers-table td {
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#viewers-table th {
+    background-color: rgba(0, 0, 0, 0.3);
+    color: var(--text-secondary);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+#viewers-table tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+#viewers-table .status-synced {
+    color: var(--success-color);
+}
+
+#viewers-table .status-desynced {
+    color: var(--error-color);
+}
+
+#viewers-table .admin-row {
+    background-color: rgba(147, 112, 219, 0.1); /* Light purple for admin */
+}
+
+#viewers-table .admin-row:hover {
+    background-color: rgba(147, 112, 219, 0.15);
+}
+
+/* Responsive adjustments for viewer table */
+@media (max-width: 768px) {
+    .viewers-table-container {
+        max-height: 150px;
+    }
+    
+    #viewers-table {
+        font-size: 0.75rem;
+    }
+    
+    #viewers-table th,
+    #viewers-table td {
+        padding: 0.3rem;
+    }
+}
+
+/* Loading state styling */
+body.loading:before {
+    content: "Loading...";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.5rem;
+    z-index: 1000;
 }

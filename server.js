@@ -8,8 +8,10 @@ const path = require('path');
 const fs = require('fs').promises; // Use promises version of fs
 const fsSync = require('fs'); // Use sync version for specific checks
 const videoEncoder = require('./tools/video-encoder');
+const crypto = require('crypto'); // For generating secure tokens
 
 const PORT = process.env.PORT || 4000;
+const SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
 // Load passwords from environment variables
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -24,6 +26,9 @@ if (!ADMIN_PASSWORD || !VIEWER_PASSWORD) {
 const app = express();
 const server = http.createServer(app);
 
+// Use JSON parsing middleware
+app.use(express.json());
+
 // Basic security headers
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -36,6 +41,89 @@ app.use((req, res, next) => {
 const publicPath = path.join(__dirname, 'public');
 console.log(`Serving static files from: ${publicPath}`);
 app.use(express.static(publicPath));
+
+// Session management
+const activeSessions = new Map(); // token -> { role, name, expiry }
+
+// Generate a secure session token
+function generateSessionToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+// Validate session token
+function validateSession(token) {
+    if (!token || !activeSessions.has(token)) {
+        return null;
+    }
+
+    const session = activeSessions.get(token);
+    const now = Date.now();
+
+    // Check for expiration
+    if (session.expiry < now) {
+        // Session expired, remove it
+        activeSessions.delete(token);
+        return null;
+    }
+
+    return session;
+}
+
+// Clean up expired sessions periodically
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    let expiredCount = 0;
+
+    for (const [token, session] of activeSessions.entries()) {
+        if (session.expiry < now) {
+            activeSessions.delete(token);
+            expiredCount++;
+        }
+    }
+
+    if (expiredCount > 0) {
+        console.log(`Cleaned up ${expiredCount} expired sessions. Active sessions: ${activeSessions.size}`);
+    }
+}
+
+// Cleanup every hour
+setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
+
+// API endpoint to validate session
+app.post('/api/validate-session', (req, res) => {
+    console.log('Session validation request received');
+    
+    if (!req.body || typeof req.body !== 'object') {
+        console.error('Invalid request body format');
+        return res.status(400).json({ valid: false, error: 'Invalid request format' });
+    }
+    
+    const { token } = req.body;
+    
+    if (!token) {
+        console.error('No token provided in validation request');
+        return res.status(400).json({ valid: false, error: 'No token provided' });
+    }
+    
+    console.log(`Validating session token: ${token.substring(0, 8)}...`);
+    const session = validateSession(token);
+
+    if (session) {
+        console.log(`Valid session found for user: ${session.name} (${session.role})`);
+        // Return session info without sensitive data
+        res.status(200).json({
+            valid: true,
+            role: session.role,
+            name: session.name
+        });
+    } else {
+        console.log('Session validation failed: token invalid or expired');
+        res.status(401).json({ 
+            valid: false, 
+            error: 'Invalid or expired session'
+        });
+    }
+});
 
 // Video serving endpoint
 app.get('/video/:filename*', (req, res) => { // Use wildcard to capture potential subpaths
@@ -192,24 +280,116 @@ const DRIFT_THRESHOLD_LOW = 0.5;    // Below this drift (seconds), increase inte
 const DRIFT_THRESHOLD_HIGH = 1.5;   // Above this drift (seconds), decrease interval
 const SYNC_INTERVAL_ADJUST_STEP = 1500; // How much to change interval by (ms)
 
+// --- Playback Rate Management Constants ---
+const MIN_PLAYBACK_RATE = 0.9;      // Minimum server playback rate (10% slow down)
+const MAX_PLAYBACK_RATE = 1.0;      // Maximum/normal server playback rate
+const PLAYBACK_RATE_ADJUST_STEP = 0.01; // How much to adjust playback rate at a time
+const RATE_ADJUSTMENT_INTERVAL = 5000;  // How often to check and adjust global rate (ms)
+const CLIENT_BEHIND_THRESHOLD = -1.0;   // If more clients are behind by this amount, slow down
+
 // --- Playback State (Master State) ---
 let masterState = {
     currentVideo: null, // Holds the filename of the current video (e.g., 'sample.mp4')
     currentTime: 0,     // Holds the current playback time in seconds
     isPlaying: false,   // Holds the current playback status
-    lastUpdateTime: Date.now()
+    lastUpdateTime: Date.now(),
+    playbackRate: 1.0   // Server-side playback rate (can be slowed down to help clients catch up)
 };
+
+// Track how many clients are significantly behind
+let rateAdjustTimerId = null;
 
 // --- Helper Functions ---
 
-// Calculate the effective current time based on master state
+// Calculate the effective current time based on master state, accounting for playback rate
 function getEffectiveTime() {
     let actualCurrentTime = masterState.currentTime;
     if (masterState.isPlaying) {
         const timeDiffSeconds = (Date.now() - masterState.lastUpdateTime) / 1000;
-        actualCurrentTime += timeDiffSeconds;
+        // Apply playback rate to the elapsed time
+        actualCurrentTime += timeDiffSeconds * masterState.playbackRate;
     }
     return Math.max(0, actualCurrentTime);
+}
+
+// Adjust server playback rate based on client sync status
+function adjustPlaybackRate() {
+    // Only adjust if we're currently playing
+    if (!masterState.isPlaying || clients.size === 0) {
+        return;
+    }
+
+    // Count how many clients are ahead vs behind
+    let clientsBehind = 0;
+    let clientsAhead = 0;
+    let totalClients = 0;
+    
+    clients.forEach((clientInfo) => {
+        if (clientInfo.lastDrift !== undefined) {
+            totalClients++;
+            // Negative drift means client is behind server
+            if (clientInfo.lastDrift < CLIENT_BEHIND_THRESHOLD) {
+                clientsBehind++;
+            } else if (clientInfo.lastDrift > 0.5) {
+                clientsAhead++;
+            }
+        }
+    });
+    
+    // If we don't have enough data, default to normal rate
+    if (totalClients === 0) {
+        if (masterState.playbackRate < MAX_PLAYBACK_RATE) {
+            masterState.playbackRate = MAX_PLAYBACK_RATE;
+            console.log(`No client drift data available. Reset playback rate to ${masterState.playbackRate}`);
+        }
+        return;
+    }
+    
+    // Calculate what percentage of clients are behind
+    const behindRatio = clientsBehind / totalClients;
+    
+    // If more than 25% of clients are significantly behind, slow down the server
+    if (behindRatio > 0.25 && masterState.playbackRate > MIN_PLAYBACK_RATE) {
+        masterState.playbackRate = Math.max(MIN_PLAYBACK_RATE, masterState.playbackRate - PLAYBACK_RATE_ADJUST_STEP);
+        console.log(`${clientsBehind} clients (${Math.round(behindRatio * 100)}%) are behind. Slowing server playback rate to ${masterState.playbackRate.toFixed(2)}x`);
+        
+        // Update the lastUpdateTime to account for the rate change
+        const currentEffectiveTime = getEffectiveTime();
+        masterState.currentTime = currentEffectiveTime;
+        masterState.lastUpdateTime = Date.now();
+        
+        // Broadcast the updated state with new playback rate
+        broadcastState();
+    } 
+    // If less than 10% of clients are behind, or more are ahead, speed up to normal
+    else if ((behindRatio < 0.1 || clientsAhead > clientsBehind) && masterState.playbackRate < MAX_PLAYBACK_RATE) {
+        masterState.playbackRate = Math.min(MAX_PLAYBACK_RATE, masterState.playbackRate + PLAYBACK_RATE_ADJUST_STEP);
+        console.log(`Few clients behind (${behindRatio.toFixed(2)}). Increasing server playback rate to ${masterState.playbackRate.toFixed(2)}x`);
+        
+        // Update the lastUpdateTime to account for the rate change
+        const currentEffectiveTime = getEffectiveTime();
+        masterState.currentTime = currentEffectiveTime;
+        masterState.lastUpdateTime = Date.now();
+        
+        // Broadcast the updated state with new playback rate
+        broadcastState();
+    }
+}
+
+// Start periodic playback rate adjustment
+function startRateAdjustment() {
+    stopRateAdjustment(); // Stop any existing timer
+    rateAdjustTimerId = setInterval(adjustPlaybackRate, RATE_ADJUSTMENT_INTERVAL);
+    console.log(`Started playback rate adjustment every ${RATE_ADJUSTMENT_INTERVAL}ms`);
+}
+
+// Stop periodic playback rate adjustment
+function stopRateAdjustment() {
+    if (rateAdjustTimerId) {
+        clearInterval(rateAdjustTimerId);
+        rateAdjustTimerId = null;
+        console.log('Stopped playback rate adjustment');
+    }
 }
 
 // Schedule the next sync state message for a specific client
@@ -239,7 +419,8 @@ function sendSyncStateToClient(ws, clientInfo) {
         type: 'syncState',
         currentVideo: masterState.currentVideo,
         targetTime: getEffectiveTime(),
-        isPlaying: masterState.isPlaying
+        isPlaying: masterState.isPlaying,
+        playbackRate: masterState.playbackRate // Include server playback rate
     };
     const stateString = JSON.stringify(stateToSend);
 
@@ -256,6 +437,45 @@ function sendSyncStateToClient(ws, clientInfo) {
     }
 }
 
+// Function to send the list of connected viewers to admins
+function sendViewerList(adminWs) {
+    // First, check if the recipient is an admin and has a valid connection
+    const adminInfo = clients.get(adminWs);
+    if (!adminInfo || adminInfo.role !== 'admin' || adminWs.readyState !== WebSocket.OPEN) {
+        console.log('Cannot send viewer list: recipient is not an admin or has invalid connection');
+        return;
+    }
+
+    // Create a list of viewers with relevant info, but without sensitive data
+    const viewers = [];
+    const serverTime = getEffectiveTime();
+
+    clients.forEach((clientInfo, ws) => {
+        // Include information about all clients, including admins
+        if (ws.readyState === WebSocket.OPEN) {
+            viewers.push({
+                role: clientInfo.role,
+                name: clientInfo.name || 'Anonymous',
+                ip: clientInfo.ip,
+                currentTime: clientInfo.lastReportedTime !== undefined ? clientInfo.lastReportedTime : null,
+                serverTime: serverTime, // Add server time for comparison
+                drift: clientInfo.lastDrift !== undefined ? clientInfo.lastDrift : null
+            });
+        }
+    });
+
+    try {
+        adminWs.send(JSON.stringify({
+            type: 'viewerList',
+            viewers: viewers,
+            count: viewers.length
+        }));
+        console.log(`Sent viewer list to admin at ${adminInfo.ip} (${viewers.length} viewers)`);
+    } catch (err) {
+        console.error(`Error sending viewer list to admin at ${adminInfo.ip}:`, err);
+    }
+}
+
 // Function to broadcast the current master state to all connected clients
 // This is now mainly used for IMMEDIATE updates after admin actions
 function broadcastState() {
@@ -263,7 +483,8 @@ function broadcastState() {
         type: 'syncState',
         currentVideo: masterState.currentVideo,
         targetTime: getEffectiveTime(), // Use calculated time
-        isPlaying: masterState.isPlaying
+        isPlaying: masterState.isPlaying,
+        playbackRate: masterState.playbackRate // Include server playback rate
     };
     const stateString = JSON.stringify(stateToSend);
     console.log(`Broadcasting immediate state: ${stateString}`);
@@ -387,7 +608,6 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', (message) => {
         console.log(`Received from ${clientIp}: ${message}`);
-        // Only process messages if the client is authenticated, except for the auth message itself
         let parsedMessage;
         try {
             parsedMessage = JSON.parse(message);
@@ -408,77 +628,144 @@ wss.on('connection', (ws, req) => {
 
         // Handle Authentication
         if (parsedMessage.type === 'auth') {
+            console.log(`Auth attempt from ${clientIp}. Message:`, parsedMessage); // Log the exact message
+
             if (clients.has(ws)) {
                  console.warn(`Client from ${clientIp} attempting to authenticate again.`);
                  ws.send(JSON.stringify({ type: 'error', message: 'Already authenticated' }));
                  return;
             }
 
-            const { password } = parsedMessage;
-            if (!password || typeof password !== 'string') {
-                console.warn(`Invalid password format from ${clientIp}`);
-                ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid password format' }));
+            let token = null;
+            let role = null;
+            let name = null;
+            let authenticated = false; // Flag to track success
+
+            // Try token authentication first
+            if (parsedMessage.token) {
+                console.log(`Attempting token authentication for ${clientIp} with token ${parsedMessage.token.substring(0, 8)}...`);
+                const session = validateSession(parsedMessage.token); // Server validates it
+                if (session) { // <-- Did validation succeed?
+                    role = session.role;
+                    name = session.name;
+                    token = parsedMessage.token; // Reuse existing token
+                    authenticated = true;
+                    console.log(`SUCCESS: Client from ${clientIp} authenticated via session token as: ${role} (${name})`);
+                } else {
+                    console.log(`FAIL: Token validation failed for ${clientIp}. Token: ${parsedMessage.token.substring(0, 8)}...`);
+                    // Explicitly fail if token was provided but invalid
+                    ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid or expired session token' }));
+                    return; // Don't fall through to password auth
+                }
+            }
+
+            // If token auth was not attempted or failed (now handled above), try password auth
+            if (!authenticated && parsedMessage.password) { // Check for password specifically
+                console.log(`Attempting password authentication for ${clientIp}`);
+                const { password, name: providedName } = parsedMessage;
+
+                if (!password || typeof password !== 'string') {
+                    console.warn(`Invalid password format from ${clientIp}`);
+                    ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid password format' }));
+                    return;
+                }
+
+                // Validate and sanitize name
+                name = providedName && typeof providedName === 'string' ?
+                    providedName.trim().substring(0, 30) : 'Anonymous'; // Limit to 30 chars
+
+                if (password === ADMIN_PASSWORD) {
+                    role = 'admin';
+                } else if (password === VIEWER_PASSWORD) {
+                    role = 'viewer';
+                } else {
+                    console.log(`FAIL: Password authentication failed for ${clientIp}: Invalid password`);
+                    ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid password' }));
+                    return;
+                }
+
+                // Password auth succeeded
+                token = generateSessionToken(); // Generate new token
+                const expiry = Date.now() + SESSION_EXPIRY;
+                activeSessions.set(token, { role, name, expiry }); // Stores NEW session
+                authenticated = true;
+                console.log(`SUCCESS: Client from ${clientIp} authenticated with password as: ${role} (${name}). New session created.`);
+            }
+
+            // If neither method succeeded
+            if (!authenticated) {
+                console.log(`FAIL: Authentication failed for ${clientIp}. No valid token or password provided.`);
+                ws.send(JSON.stringify({ type: 'auth_fail', message: 'Authentication required' }));
                 return;
             }
 
-            let role = null;
+            // Auth successful, initialize client state
+            // Note: Use the determined role, name, token here
+            clients.set(ws, {
+                role,
+                ip: clientIp,
+                name, // Use the validated/provided name
+                token, // Use the validated or newly generated token
+                lastDrift: 0,
+                lastReportedTime: 0,
+                currentSyncInterval: DEFAULT_SYNC_INTERVAL,
+                syncTimerId: null
+            });
 
-            if (password === ADMIN_PASSWORD) {
-                role = 'admin';
-            } else if (password === VIEWER_PASSWORD) {
-                role = 'viewer';
-            }
+            clearTimeout(authTimeout);
 
-            if (role) {
-                console.log(`Client from ${clientIp} authenticated as: ${role}`);
-                // Initialize client state with defaults for adaptive sync
-                clients.set(ws, {
+            try {
+                // Send confirmation back to client with token, role, and name
+                ws.send(JSON.stringify({
+                    type: 'auth_success',
                     role,
-                    ip: clientIp,
-                    lastDrift: 0,
-                    currentSyncInterval: DEFAULT_SYNC_INTERVAL,
-                    syncTimerId: null
-                 });
-                clearTimeout(authTimeout); // Clear the authentication timeout
-                
-                try {
-                    // Send confirmation back to client
-                    ws.send(JSON.stringify({ type: 'auth_success', role }));
+                    token,
+                    name // Send name back on success
+                }));
 
-                    // Send current state immediately upon successful auth
-                    const clientInfo = clients.get(ws);
-                    sendSyncStateToClient(ws, clientInfo); // Sends initial state & schedules next sync if playing
+                // Send current state immediately upon successful auth
+                const clientInfo = clients.get(ws); // Get the newly set info
+                sendSyncStateToClient(ws, clientInfo); // Sends initial state & schedules next sync if playing
 
-                    // If this is the first client AND the master state is currently playing, start sync
-                    // Otherwise, sync will start when admin presses play.
-                    if (clients.size === 1 && masterState.isPlaying) {
-                        startPeriodicSync();
-                    }
-
-                    // If admin, also send the video list
-                    if (role === 'admin') {
-                        getVideoList().then(videoList => {
-                            console.log('Sending video list to admin upon auth');
-                            if (ws.readyState === WebSocket.OPEN) {
-                                ws.send(JSON.stringify({ type: 'videoList', videos: videoList }));
-                            }
-                        }).catch(err => {
-                            console.error("Error getting video list for admin auth:", err);
-                            // Optionally send an error to the admin
-                            if (ws.readyState === WebSocket.OPEN) {
-                                ws.send(JSON.stringify({ type: 'error', message: 'Could not retrieve video list' }));
-                            }
-                        });
-                    }
-                } catch (err) {
-                    console.error(`Error sending auth response to ${clientIp}:`, err);
-                    clients.delete(ws);
+                // If this is the first client AND the master state is currently playing, start sync
+                // Otherwise, sync will start when admin presses play.
+                if (clients.size === 1 && masterState.isPlaying) {
+                    startRateAdjustment();
                 }
-            } else {
-                console.log(`Client from ${clientIp} authentication failed: Invalid password`);
-                ws.send(JSON.stringify({ type: 'auth_fail', message: 'Invalid password' }));
-                // Optional: close connection on failed auth attempt
-                // ws.close();
+
+                // If admin, also send the video list and viewer list
+                if (role === 'admin') {
+                    getVideoList().then(videoList => {
+                        console.log('Sending video list to admin upon auth');
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'videoList', videos: videoList }));
+
+                            // Also send the viewer list
+                            sendViewerList(ws);
+                        }
+                    }).catch(err => {
+                        console.error("Error getting video list for admin auth:", err);
+                        // Optionally send an error to the admin
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'error', message: 'Could not retrieve video list' }));
+                        }
+                    });
+                }
+
+                // Notify all admins that a new client has joined (regardless of role)
+                // This ensures the admin list is updated immediately when anyone joins
+                clients.forEach((c_info, c_ws) => {
+                    if (c_info.role === 'admin' && c_ws !== ws && c_ws.readyState === WebSocket.OPEN) { // Exclude self
+                         console.log(`Notifying admin ${c_info.name} about new client ${name}`);
+                         sendViewerList(c_ws);
+                    }
+                });
+
+            } catch (err) {
+                console.error(`Error sending auth response or post-auth data to ${clientIp}:`, err);
+                // Clean up client if send fails during auth response
+                if (clientInfo && clientInfo.syncTimerId) clearTimeout(clientInfo.syncTimerId);
+                clients.delete(ws);
             }
             return; // Authentication message handled
         }
@@ -495,7 +782,7 @@ wss.on('connection', (ws, req) => {
 
         // Only admins can send control messages
         if (clientInfo.role !== 'admin' && [
-            'play', 'pause', 'seek', 'changeVideo', 'requestVideoList'
+            'play', 'pause', 'seek', 'changeVideo', 'requestVideoList', 'requestViewerList'
         ].includes(parsedMessage.type)) {
             console.warn(`Received control message type '${parsedMessage.type}' from non-admin at ${clientInfo.ip}. Ignoring.`);
             ws.send(JSON.stringify({ type: 'error', message: 'Permission denied' }));
@@ -510,7 +797,8 @@ wss.on('connection', (ws, req) => {
                     masterState.isPlaying = true;
                     masterState.lastUpdateTime = Date.now();
                     broadcastState(); // Broadcast immediate change & reschedule syncs for all clients
-                    // No need to call startPeriodicSync anymore
+                    // Start playback rate adjustment when playing
+                    startRateAdjustment();
                 }
                 break;
             case 'pause':
@@ -518,11 +806,17 @@ wss.on('connection', (ws, req) => {
                     console.log(`Admin at ${clientInfo.ip} action: Pause`);
                     const now = Date.now();
                     const timeDiffSeconds = (now - masterState.lastUpdateTime) / 1000;
-                    masterState.currentTime += timeDiffSeconds;
+                    masterState.currentTime += timeDiffSeconds * masterState.playbackRate; // Apply rate when pausing
                     masterState.isPlaying = false;
                     masterState.lastUpdateTime = now;
-                    broadcastState(); // Broadcast immediate change. scheduleNextSync won't schedule new timeouts because isPlaying is false.
-                    // No need to call stopPeriodicSync anymore, individual timers won't reschedule
+                    broadcastState(); // Broadcast immediate change
+                    // Stop playback rate adjustment when paused
+                    stopRateAdjustment();
+                    // Reset to normal playback rate when paused
+                    if (masterState.playbackRate < MAX_PLAYBACK_RATE) {
+                        masterState.playbackRate = MAX_PLAYBACK_RATE;
+                        console.log(`Reset playback rate to ${masterState.playbackRate} on pause`);
+                    }
                 }
                 break;
             case 'seek':
@@ -571,6 +865,8 @@ wss.on('connection', (ws, req) => {
                         masterState.isPlaying = false; // Start paused
                         masterState.lastUpdateTime = Date.now();
                         broadcastState(); // Broadcast immediate change. Timers won't reschedule.
+                        // Reset playback rate to normal when changing videos
+                        masterState.playbackRate = MAX_PLAYBACK_RATE;
                     })
                     .catch(err => {
                         console.error(`Admin at ${clientInfo.ip} requested non-existent or unreadable HLS stream: ${newVideo}`, err);
@@ -593,39 +889,59 @@ wss.on('connection', (ws, req) => {
                      }
                 });
                 break;
+            case 'requestViewerList':
+                // Only admin can request this (already checked above)
+                console.log(`Admin at ${clientInfo.ip} requested viewer list`);
+                sendViewerList(ws);
+                break;
             case 'requestSync':
                  console.log(`Client ${clientInfo.ip} requested state sync.`);
                  sendSyncStateToClient(ws, clientInfo); // Send state just to requester & reschedule their next sync
                  break;
-            // ADD Handler for client time updates
+            // Handle client time updates
             case 'clientTimeUpdate':
-                if (masterState.isPlaying && typeof parsedMessage.clientTime === 'number' && !isNaN(parsedMessage.clientTime)) {
+                if (typeof parsedMessage.clientTime === 'number' && !isNaN(parsedMessage.clientTime)) {
                     const clientTime = parsedMessage.clientTime;
                     const serverTime = getEffectiveTime();
                     const drift = clientTime - serverTime; // Positive drift means client is ahead
+                    
+                    // Update client information regardless of playing state
                     clientInfo.lastDrift = drift;
-
-                    // Adjust sync interval based on drift
-                    let intervalAdjusted = false;
-                    if (Math.abs(drift) > DRIFT_THRESHOLD_HIGH && clientInfo.currentSyncInterval > MIN_SYNC_INTERVAL) {
-                        // High drift, need to sync more often
-                        clientInfo.currentSyncInterval = Math.max(MIN_SYNC_INTERVAL, clientInfo.currentSyncInterval - SYNC_INTERVAL_ADJUST_STEP);
-                        intervalAdjusted = true;
-                        console.log(`High drift (${drift.toFixed(2)}s) for ${clientInfo.ip}. Reducing sync interval to ${clientInfo.currentSyncInterval}ms.`);
-                    } else if (Math.abs(drift) < DRIFT_THRESHOLD_LOW && clientInfo.currentSyncInterval < MAX_SYNC_INTERVAL) {
-                        // Low drift, can sync less often
-                        clientInfo.currentSyncInterval = Math.min(MAX_SYNC_INTERVAL, clientInfo.currentSyncInterval + SYNC_INTERVAL_ADJUST_STEP);
-                        intervalAdjusted = true;
-                        console.log(`Low drift (${drift.toFixed(2)}s) for ${clientInfo.ip}. Increasing sync interval to ${clientInfo.currentSyncInterval}ms.`);
+                    clientInfo.lastReportedTime = clientTime;
+                    
+                    // Update client name if provided and different
+                    if (parsedMessage.name && parsedMessage.name !== clientInfo.name) {
+                        clientInfo.name = parsedMessage.name.substring(0, 30); // Limit to 30 chars
                     }
+                    
+                    // Only adjust sync intervals if the video is playing
+                    if (masterState.isPlaying) {
+                        // Adjust sync interval based on drift
+                        let intervalAdjusted = false;
+                        if (Math.abs(drift) > DRIFT_THRESHOLD_HIGH && clientInfo.currentSyncInterval > MIN_SYNC_INTERVAL) {
+                            // High drift, need to sync more often
+                            clientInfo.currentSyncInterval = Math.max(MIN_SYNC_INTERVAL, clientInfo.currentSyncInterval - SYNC_INTERVAL_ADJUST_STEP);
+                            intervalAdjusted = true;
+                            console.log(`High drift (${drift.toFixed(2)}s) for ${clientInfo.ip}. Reducing sync interval to ${clientInfo.currentSyncInterval}ms.`);
+                        } else if (Math.abs(drift) < DRIFT_THRESHOLD_LOW && clientInfo.currentSyncInterval < MAX_SYNC_INTERVAL) {
+                            // Low drift, can sync less often
+                            clientInfo.currentSyncInterval = Math.min(MAX_SYNC_INTERVAL, clientInfo.currentSyncInterval + SYNC_INTERVAL_ADJUST_STEP);
+                            intervalAdjusted = true;
+                            console.log(`Low drift (${drift.toFixed(2)}s) for ${clientInfo.ip}. Increasing sync interval to ${clientInfo.currentSyncInterval}ms.`);
+                        }
 
-                    // If interval was adjusted, reschedule the next sync immediately with the new interval
-                    if (intervalAdjusted) {
-                        scheduleNextSync(ws, clientInfo);
+                        // If interval was adjusted, reschedule the next sync immediately with the new interval
+                        if (intervalAdjusted) {
+                            scheduleNextSync(ws, clientInfo);
+                        }
                     }
-                } else if (!masterState.isPlaying) {
-                     // Ignore client time updates if master state is paused
-                     // console.log(`Ignoring clientTimeUpdate from ${clientInfo.ip} because master state is paused.`);
+                    
+                    // Always notify admins of updated viewer information, even when paused
+                    clients.forEach((info, clientWs) => {
+                        if (info.role === 'admin' && clientWs.readyState === WebSocket.OPEN) {
+                            sendViewerList(clientWs);
+                        }
+                    });
                 } else {
                     console.warn(`Invalid clientTimeUpdate received from ${clientInfo.ip}:`, parsedMessage);
                 }
@@ -641,34 +957,43 @@ wss.on('connection', (ws, req) => {
         const clientInfo = clients.get(ws);
         const role = clientInfo ? clientInfo.role : 'unknown';
         const ip = clientInfo ? clientInfo.ip : clientIp;
-        console.log(`Client (${role}) from ${ip} disconnected`);
+        const name = clientInfo ? clientInfo.name : 'Anonymous';
+        console.log(`Client (${role}) ${name} from ${ip} disconnected`);
+        
         if (clientInfo && clientInfo.syncTimerId) {
             clearTimeout(clientInfo.syncTimerId); // Clear timer on disconnect
         }
         clearTimeout(authTimeout);
         clients.delete(ws);
-        // No need to stop global sync anymore
+        
+        // Notify admins that a viewer has disconnected
+        clients.forEach((info, clientWs) => {
+            if (info.role === 'admin' && clientWs.readyState === WebSocket.OPEN) {
+                sendViewerList(clientWs);
+            }
+        });
     });
 
     ws.on('error', (error) => {
         const clientInfo = clients.get(ws);
         const role = clientInfo ? clientInfo.role : 'unknown';
         const ip = clientInfo ? clientInfo.ip : clientIp;
-        console.error(`WebSocket error for client (${role}) from ${ip}:`, error);
+        const name = clientInfo ? clientInfo.name : 'Anonymous';
+        console.error(`WebSocket error for client (${role}) ${name} from ${ip}:`, error);
+        
         if (clientInfo && clientInfo.syncTimerId) {
             clearTimeout(clientInfo.syncTimerId); // Clear timer on error
         }
         clearTimeout(authTimeout);
         clients.delete(ws);
-        // No need to stop global sync anymore
+        
+        // Notify admins that a viewer has disconnected
+        clients.forEach((info, clientWs) => {
+            if (info.role === 'admin' && clientWs.readyState === WebSocket.OPEN) {
+                sendViewerList(clientWs);
+            }
+        });
     });
-
-    // REMOVED starting sync unconditionally on connection
-    /*
-    if (clients.size === 0) {
-        startPeriodicSync();
-    }
-    */
 });
 
 // --- Auto-Encoding Logic ---
@@ -766,6 +1091,7 @@ server.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
     console.log('SIGINT signal received: closing HTTP server and WebSocket connections');
+    stopRateAdjustment(); // Stop rate adjustment timer
     wss.clients.forEach(client => {
         try {
             client.close(1000, 'Server shutting down');
