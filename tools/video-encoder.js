@@ -91,7 +91,15 @@ async function encodeToMP4(inputFile, outputName, options = {}) {
  * @returns {Promise<String>} - Resolves with the path to the master playlist on success.
  */
 async function createHLSStream(inputFile, outputName) {
-    const inputFilePath = path.join(videoDir, inputFile);
+    // inputFile is already the absolute path from video-service.js
+    const inputFilePath = inputFile; 
+    
+    // Optional: Add a check to ensure it's absolute, though it should be
+    // if (!path.isAbsolute(inputFilePath)) {
+    //     console.warn(`[video-encoder] Received non-absolute path: ${inputFilePath}. Resolving against videoDir.`);
+    //     inputFilePath = path.resolve(videoDir, inputFile); 
+    // }
+
     if (!fsSync.existsSync(inputFilePath)) {
         throw new Error(`Input file does not exist: ${inputFilePath}`);
     }

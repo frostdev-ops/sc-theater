@@ -11,8 +11,8 @@ const statusIcon = document.getElementById('status-icon');
 const statusMessage = document.getElementById('status-message');
 const videoPlayer = document.getElementById('video-player');
 const adminControls = document.getElementById('admin-controls');
-const playBtn = document.getElementById('play-btn');
-const pauseBtn = document.getElementById('pause-btn');
+let playBtn = document.getElementById('play-btn');
+let pauseBtn = document.getElementById('pause-btn');
 const seekSlider = document.getElementById('seek-slider');
 const timeDisplay = document.getElementById('time-display');
 const videoList = document.getElementById('video-list');
@@ -24,6 +24,62 @@ const viewerCount = document.getElementById('viewer-count');
 const viewersList = document.getElementById('viewers-list');
 const serverTimeDisplay = document.getElementById('server-time-display');
 const logoutBtn = document.getElementById('logout-btn');
+
+// Add to the DOM Elements section at the top
+const autoplayFallbackOverlay = document.createElement('div');
+autoplayFallbackOverlay.className = 'autoplay-fallback-overlay hidden';
+autoplayFallbackOverlay.innerHTML = `
+    <div class="autoplay-fallback-content">
+        <h3>Autoplay Blocked</h3>
+        <p>Your browser has blocked automatic playback.</p>
+        <button id="manual-play-btn" class="btn">Click to Play</button>
+    </div>
+`;
+document.body.appendChild(autoplayFallbackOverlay);
+const manualPlayBtn = document.getElementById('manual-play-btn');
+
+// Add this CSS to complement the overlay
+// We'll add it inline since we're not editing the CSS file directly
+const style = document.createElement('style');
+style.textContent = `
+    .autoplay-fallback-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    .autoplay-fallback-overlay.hidden {
+        display: none;
+    }
+    .autoplay-fallback-content {
+        background-color: #2c3e50;
+        padding: 2rem;
+        border-radius: 8px;
+        max-width: 90%;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+    #manual-play-btn {
+        margin-top: 1rem;
+        padding: 0.75rem 1.5rem;
+        background-color: #3498db;
+        border: none;
+        color: white;
+        font-weight: bold;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    #manual-play-btn:hover {
+        background-color: #2980b9;
+    }
+`;
+document.head.appendChild(style);
 
 // Application State
 let ws = null;
@@ -38,782 +94,95 @@ let isAdjusting = false; // Flag to prevent recursive sync
 let isManuallyChangingTime = false; // Flag to prevent sync during manual seek
 let hlsPlayer = null; // For HLS playback
 let clientTimeUpdateIntervalId = null; // Timer for sending client time
-const CLIENT_TIME_UPDATE_INTERVAL = 5000; // Send time every 5 seconds
+const CLIENT_TIME_UPDATE_INTERVAL = 1000; // Send time every 1 second (changed from 5000ms)
 let serverPlaybackRate = 1.0; // Track server's playback rate
 let userName = ''; // Store the user's name
 let connectedViewers = []; // Store data about connected viewers
 let sessionToken = null; // Store session token
+let masterState = null; // Track server state
 
-// Format time (seconds) to mm:ss
-function formatTime(seconds) {
-    seconds = Math.max(0, seconds);
-    const minutes = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${minutes}:${secs.toString().padStart(2, '0')}`;
-}
+// Add global variables for smooth time tracking
+let lastServerTimeUpdate = 0;
+let lastServerTime = 0;
+let isAnimationFrameActive = false;
+let viewerTimeEstimates = new Map(); // Maps viewer IPs to their estimated time data
+let viewerListAnimationId = null; // Store the requestAnimationFrame ID
+let currentViewerIps = new Set(); // Track current IPs to detect changes
 
-// Set a cookie with name, value and expiration days
-function setCookie(name, value, days = 7, path = '/') {
-    const expires = new Date();
-    expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
-    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=${path};SameSite=Strict`;
-    console.log(`Cookie set: ${name} (expires in ${days} days)`);
-}
+// Remove LogManager class
+// class LogManager { ... } // REMOVED (moved to utils.js)
 
-// Delete a cookie by name
-function deleteCookie(name, path = '/') {
-    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=${path};SameSite=Strict`;
-    console.log(`Cookie deleted: ${name}`);
-}
+// Create global logger instance for client
+// REMOVE instantiation here, it will be created after utils.js is loaded
+// const logger = new LogManager(); // REMOVED
 
-// Get a cookie by name
-function getCookie(name) {
-    const nameEQ = name + "=";
-    const ca = document.cookie.split(';');
-    for (let i = 0; i < ca.length; i++) {
-        let c = ca[i];
-        while (c.charAt(0) === ' ') c = c.substring(1, c.length);
-        if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-    }
-    return null;
-}
+// Remove formatTime function
+// function formatTime(seconds, showDecimals = false) { ... } // REMOVED (moved to utils.js)
 
-// Try to validate session and auto-login
-async function validateSession() {
-    const sessionToken = getCookie('session_token');
-    console.log('Validating session, token exists:', !!sessionToken);
-    
-    if (!sessionToken) {
-        console.log('No session token found');
-        return false;
-    }
-    
-    try {
-        const response = await fetch('/api/validate-session', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache, no-store, must-revalidate'
-            },
-            body: JSON.stringify({ token: sessionToken })
-        });
+// Remove cookie functions
+// function setCookie(name, value, days = 7, path = '/') { ... } // REMOVED (moved to auth.js)
+// function deleteCookie(name, path = '/') { ... } // REMOVED (moved to auth.js)
+// function getCookie(name) { ... } // REMOVED (moved to auth.js)
 
-        if (!response.ok) {
-            console.error('Session validation failed:', response.status);
-            // Clear invalid session cookie
-            deleteCookie('session_token');
-            return false;
-        }
+// Remove validateSession function
+// async function validateSession() { ... } // REMOVED (moved to auth.js)
 
-        const data = await response.json();
-        
-        if (data.valid) {
-            console.log('Session is valid, connecting with token');
-            connectWebSocket(null, null, sessionToken);
-            return true;
-        } else {
-            console.error('Server returned invalid session:', data.error);
-            deleteCookie('session_token');
-            return false;
-        }
-    } catch (error) {
-        console.error('Error validating session:', error);
-        return false;
-    }
-}
+// Remove handleAuthSuccess function
+// function handleAuthSuccess(message) { ... } // REMOVED (moved to auth.js)
 
-// Initialize HLS playback for a stream
-function initHLSPlayback(streamName) {
-    // Clean up any existing HLS player
-    if (hlsPlayer) {
-        hlsPlayer.destroy();
-        hlsPlayer = null;
-    }
-    
-    const streamPath = streamName.substring(4); // Remove 'hls:' prefix
-    const manifestUrl = `/video/${streamPath}/master.m3u8`;
-    
-    if (Hls.isSupported()) {
-        hlsPlayer = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true
-        });
-        
-        hlsPlayer.loadSource(manifestUrl);
-        hlsPlayer.attachMedia(videoPlayer);
-        
-        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
-            console.log('HLS manifest loaded');
-            setStatusMessage('HLS stream loaded');
-        });
-        
-        hlsPlayer.on(Hls.Events.ERROR, function(event, data) {
-            if (data.fatal) {
-                console.error('Fatal HLS error:', data);
-                setStatusMessage('HLS playback error. Trying to recover...', true);
-                switch(data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        hlsPlayer.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        hlsPlayer.recoverMediaError();
-                        break;
-                    default:
-                        // Cannot recover
-                        hlsPlayer.destroy();
-                        setStatusMessage('Cannot recover from HLS error', true);
-                        break;
-                }
-            }
-        });
-    } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-        // Native HLS support (Safari)
-        videoPlayer.src = manifestUrl;
-    } else {
-        setStatusMessage('HLS playback not supported in this browser', true);
-    }
-}
+// Remove handleAuthFailure function
+// function handleAuthFailure(message) { ... } // REMOVED (moved to auth.js)
 
-// Update time display
-function updateTimeDisplay() {
-    if (videoPlayer && videoPlayer.duration) {
-        timeDisplay.textContent = `${formatTime(videoPlayer.currentTime)} / ${formatTime(videoPlayer.duration)}`;
-        if (!isManuallyChangingTime) {
-            seekSlider.value = (videoPlayer.currentTime / videoPlayer.duration) * 100;
-        }
-    }
-}
+// Remove logout function
+// function logout() { ... } // REMOVED (moved to auth.js)
 
-// Update server time display
-function updateServerTimeDisplay(serverTime) {
-    if (serverTimeDisplay) {
-        serverTimeDisplay.textContent = `Server Time: ${formatTime(serverTime)}`;
-    }
-}
+// Remove connectWebSocket function
+// function connectWebSocket(password, name, token) { ... } // REMOVED (moved to websocket.js)
 
-// Update the viewers list table in the admin panel
-function updateViewersList() {
-    if (!viewersList || userRole !== 'admin') return;
-    
-    // Clear existing table
-    viewersList.innerHTML = '';
-    
-    // Update viewer count
-    if (viewerCount) {
-        // Count only viewers, not admins
-        const viewerOnlyCount = connectedViewers.filter(v => v.role === 'viewer').length;
-        viewerCount.textContent = viewerOnlyCount.toString();
-    }
-    
-    // Add each viewer to the table
-    connectedViewers.forEach(viewer => {
-        const row = document.createElement('tr');
-        
-        // Create name cell
-        const nameCell = document.createElement('td');
-        nameCell.textContent = viewer.name || 'Anonymous';
-        row.appendChild(nameCell);
-        
-        // Create IP cell
-        const ipCell = document.createElement('td');
-        // Mask part of the IP for privacy
-        const maskedIp = viewer.ip.replace(/(\d+\.\d+\.\d+)\.\d+/, '$1.xxx');
-        ipCell.textContent = maskedIp;
-        row.appendChild(ipCell);
-        
-        // Create time cell
-        const timeCell = document.createElement('td');
-        if (viewer.currentTime !== undefined && viewer.currentTime !== null) {
-            timeCell.textContent = formatTime(viewer.currentTime);
-        } else {
-            timeCell.textContent = 'N/A';
-        }
-        row.appendChild(timeCell);
-        
-        // Create status cell 
-        const statusCell = document.createElement('td');
-        
-        // Check if we have both times to compare
-        if (viewer.currentTime !== undefined && viewer.currentTime !== null && 
-            viewer.serverTime !== undefined && viewer.serverTime !== null) {
-            
-            const diff = Math.abs(viewer.currentTime - viewer.serverTime);
-            
-            // If time is within 2 seconds of server time, show "In sync"
-            if (diff < 2) {
-                statusCell.textContent = 'In sync';
-                statusCell.className = 'status-synced';
-            } else {
-                // Calculate difference and direction
-                const diffFormatted = diff.toFixed(1);
-                const direction = viewer.currentTime < viewer.serverTime ? 'behind' : 'ahead';
-                statusCell.textContent = `${diffFormatted}s ${direction}`;
-                statusCell.className = 'status-desynced';
-            }
-        } else {
-            statusCell.textContent = 'Unknown';
-        }
-        
-        row.appendChild(statusCell);
-        
-        // Highlight the row if it's the admin
-        if (viewer.role === 'admin') {
-            row.className = 'admin-row';
-        }
-        
-        viewersList.appendChild(row);
-    });
-}
+// Remove sendControlMessage function
+// function sendControlMessage(type, data = {}) { ... } // REMOVED (moved to websocket.js)
 
-// Set status message
-function setStatusMessage(message, isError = false) {
-    statusMessage.textContent = message;
-    statusMessage.style.color = isError ? '#e74c3c' : '#555';
-    
-    // Clear message after 5 seconds
-    setTimeout(() => {
-        if (statusMessage.textContent === message) {
-            statusMessage.textContent = '';
-        }
-    }, 5000);
-}
+// Remove startClientTimeUpdates function
+// function startClientTimeUpdates() { ... } // REMOVED (moved to playback.js / TBD)
 
-// Connect to WebSocket server
-function connectWebSocket(password, name, token) {
-    // Get the current hostname and correct port
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.hostname}:${window.location.port}`;
-    
-    // Store name in global variable if provided
-    if (name) {
-        userName = name;
-    }
-    
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-        console.log('WebSocket connection established');
-        
-        // Send authentication message with token or password
-        if (token) {
-            console.log(`[ws.onopen] Attempting authentication with TOKEN: ${token.substring(0, 8)}...`);
-            const authMessage = {
-                type: 'auth',
-                token
-            };
-            console.log('[ws.onopen] Sending token auth message:', authMessage);
-            ws.send(JSON.stringify(authMessage));
-            setStatusMessage('Connecting with saved session...');
-        } else {
-            console.log('[ws.onopen] Attempting authentication with PASSWORD.');
-            const authMessage = {
-                type: 'auth',
-                password, // Note: password comes from function args
-                name: userName // Note: userName is global
-            };
-            console.log('[ws.onopen] Sending password auth message:', authMessage);
-            ws.send(JSON.stringify(authMessage));
-            setStatusMessage('Connecting...');
-        }
-    };
-    
-    ws.onmessage = (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            console.log('Received:', message);
-            
-            switch (message.type) {
-                case 'auth_success':
-                    handleAuthSuccess(message);
-                    break;
-                case 'auth_fail':
-                    handleAuthFailure(message);
-                    break;
-                case 'syncState':
-                    handleSyncState(message);
-                    break;
-                case 'videoList':
-                    handleVideoList(message);
-                    break;
-                case 'viewerList':
-                    handleViewerList(message);
-                    break;
-                case 'error':
-                    setStatusMessage(`Error: ${message.message}`, true);
-                    break;
-                default:
-                    console.warn('Unknown message type:', message.type);
-            }
-        } catch (err) {
-            console.error('Error processing message:', err);
-        }
-    };
-    
-    ws.onclose = (event) => {
-        console.log('WebSocket connection closed:', event.code, event.reason);
-        setStatusMessage('Disconnected from server. Refresh to reconnect.', true);
-        statusIcon.style.backgroundColor = '#e74c3c';
-        stopClientTimeUpdates(); // Stop sending updates
-    };
-    
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setStatusMessage('Connection error. Please try again.', true);
-    };
-}
+// Remove sendTimeUpdate function
+// function sendTimeUpdate() { ... } // REMOVED (moved to playback.js / TBD)
 
-// Handle successful authentication
-function handleAuthSuccess(message) {
-    userRole = message.role;
-    isAuthenticated = true;
-    
-    // Use the name provided by the server
-    if (message.name) {
-        userName = message.name;
-        console.log(`Auth success: Received name from server: ${userName}`);
-    }
+// Remove stopClientTimeUpdates function
+// function stopClientTimeUpdates() { ... } // REMOVED (moved to playback.js / TBD)
 
-    // Save session token if provided
-    if (message.token) {
-        sessionToken = message.token;
-        setCookie('session_token', sessionToken, 7); // Store for 7 days
-        console.log('Session token saved to cookie');
-    }
-    
-    // Update UI
-    authContainer.classList.add('hidden');
-    appContainer.classList.remove('hidden');
-    roleText.textContent = userRole;
-    
-    // Show admin controls if applicable
-    if (userRole === 'admin') {
-        adminControls.classList.remove('hidden');
-        // Request initial viewer list if admin
-        requestViewerList();
-    }
-    
-    setStatusMessage(`Successfully connected as ${userRole}`);
-
-    // Start sending client time updates periodically
-    startClientTimeUpdates();
-}
-
-// Handle authentication failure
-function handleAuthFailure(message) {
-    console.error('Authentication failed:', message.message);
-    authError.textContent = message.message || 'Invalid password';
-    
-    // Clear any stored session
-    sessionToken = null;
-    deleteCookie('session_token');
-    
-    ws.close();
-}
-
-// Add logout function
-function logout() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-    }
-    
-    // Clear session data
-    sessionToken = null;
-    deleteCookie('session_token');
-    userRole = null;
-    isAuthenticated = false;
-    
-    // Reset UI
-    authContainer.classList.remove('hidden');
-    appContainer.classList.add('hidden');
-    passwordInput.value = '';
-}
-
-// Handle viewer list update
-function handleViewerList(message) {
-    if (userRole !== 'admin') return; // Only process if admin
-    
-    connectedViewers = message.viewers || [];
-    updateViewersList();
-}
-
-// Handle video list from server
-function handleVideoList(message) {
-    // Clear existing options in the main video list dropdown
-    videoList.innerHTML = '';
-    // sourceVideoSelect.innerHTML = ''; // Keep source select empty for now
-
-    // Add options for each HLS stream
-    message.videos.forEach(hlsStreamIdentifier => { // e.g., "hls:my_video_stream"
-        // Main video list dropdown (for playback)
-        const option = document.createElement('option');
-        option.value = hlsStreamIdentifier;
-
-        // Display friendly name: remove 'hls:' prefix
-        const streamName = hlsStreamIdentifier.startsWith('hls:') ? hlsStreamIdentifier.substring(4) : hlsStreamIdentifier;
-        option.textContent = `${streamName} (HLS)`;
-
-        videoList.appendChild(option);
-
-        // We are not populating sourceVideoSelect here anymore as it requires source files list
-    });
-
-    // Select current video if available in the new list
-    if (currentVideo && message.videos.includes(currentVideo)) {
-        videoList.value = currentVideo;
-    } else if (message.videos.length > 0) {
-        // Otherwise select the first video from the HLS list
-        videoList.value = message.videos[0];
-        // If no video was selected previously, set it now
-        if (!currentVideo) {
-            currentVideo = message.videos[0];
-            // Potentially trigger initial load if needed, though syncState should handle it
-            // handleSyncState({ currentVideo: currentVideo, targetTime: 0, isPlaying: false });
-        }
-    }
-
-    setStatusMessage('HLS Video list updated');
-}
-
-// Handle synchronization state from server
-function handleSyncState(message) {
-    if (isAdjusting) return; // Prevent recursive adjustments
-
-    const newVideo = message.currentVideo; // Expected format: "hls:streamName"
-    const isPlaying = message.isPlaying;
-    const serverTime = message.targetTime;
-    
-    // Update server time display for admins
-    if (userRole === 'admin' && serverTime !== undefined) {
-        updateServerTimeDisplay(serverTime);
-    }
-    
-    // Update server playback rate if provided (new feature)
-    if (message.playbackRate !== undefined && message.playbackRate !== serverPlaybackRate) {
-        console.log(`Server playback rate changed: ${serverPlaybackRate} -> ${message.playbackRate}`);
-        serverPlaybackRate = message.playbackRate;
-    }
-
-    // Add/Remove paused state class for overlay
-    if (videoContainer) {
-        if (isPlaying) {
-            videoContainer.classList.remove('paused-state');
-        } else {
-            videoContainer.classList.add('paused-state');
-        }
-    }
-
-    // Check if video needs to be loaded or changed
-    if (newVideo && newVideo.startsWith('hls:') && newVideo !== currentVideo) {
-        console.log(`Sync: Changing video source to ${newVideo}`);
-        currentVideo = newVideo;
-        initHLSPlayback(currentVideo);
-        setStatusMessage(`Loading video: ${currentVideo.substring(4)}`);
-        // Sync time/play state *after* HLS is ready (initHLSPlayback handles this via events)
-        // We might need to defer the synchronizeVideo call until HLS manifest is parsed.
-        // Let's add a flag or check readyState in initHLSPlayback/synchronizeVideo
-
-         // Update dropdown selection to match server state
-         if (videoList.value !== currentVideo) {
-            videoList.value = currentVideo;
-        }
-
-    } else if (!newVideo && currentVideo) {
-        // Server indicates no video selected
-        console.log('Sync: No video selected by server.');
-        if (hlsPlayer) hlsPlayer.destroy();
-        videoPlayer.src = '';
-        currentVideo = null;
-        videoList.value = ''; // Deselect in dropdown
-    } else {
-        // Video source is the same, just sync time/play state
-        // Ensure video element is ready (HLS might still be loading)
-        if (videoPlayer.readyState >= 1 || (hlsPlayer && hlsPlayer.media === videoPlayer)) { // Check if HLS is attached
-            synchronizeVideo(message.targetTime, message.isPlaying);
-        } else {
-            // Video not ready, wait for HLS manifest or native canplay
-            console.log('Sync: Video not ready, deferring time sync.');
-            const readyHandler = () => {
-                 console.log('Sync: Video ready, applying state.');
-                 synchronizeVideo(message.targetTime, message.isPlaying);
-                 videoPlayer.removeEventListener('canplay', readyHandler);
-                 if (hlsPlayer) hlsPlayer.off(Hls.Events.MANIFEST_PARSED, readyHandler);
-            };
-            videoPlayer.addEventListener('canplay', readyHandler);
-            if (hlsPlayer) hlsPlayer.on(Hls.Events.MANIFEST_PARSED, readyHandler);
-        }
-    }
-}
-
-// Enhanced synchronization logic
-function synchronizeVideo(targetTime, isPlaying) {
-    isAdjusting = true;
-    
-    // Also update overlay based on synchronized state
-    if (videoContainer) {
-        if (isPlaying) {
-            videoContainer.classList.remove('paused-state');
-        } else {
-            videoContainer.classList.add('paused-state');
-        }
-    }
-
-    const currentTime = videoPlayer.currentTime;
-    const timeDiff = Math.abs(currentTime - targetTime);
-    const direction = currentTime < targetTime ? 'behind' : 'ahead';
-    
-    // Update play/pause state to match server
-    if (isPlaying && videoPlayer.paused) {
-        videoPlayer.play().catch(err => {
-            console.error('Error while trying to play:', err);
-            setStatusMessage('Autoplay failed - browser restrictions', true);
-        });
-    } else if (!isPlaying && !videoPlayer.paused) {
-        videoPlayer.pause();
-    }
-    
-    // Time synchronization with new thresholds and more subtle adjustments,
-    // now accounting for server's modified playback rate
-    if (timeDiff > syncThresholdJump) {
-        // Very large desync (> 10 seconds) - jump directly to target time
-        console.log(`Very large desync detected (${timeDiff.toFixed(2)}s). Jumping to server time.`);
-        videoPlayer.currentTime = targetTime;
-        // Apply server's playback rate - if server is running slow, we match it
-        videoPlayer.playbackRate = serverPlaybackRate;
-    } else if (timeDiff > syncThresholdLarge) {
-        // Large desync (3.1 to 7.0 seconds) - adjust playback rate (5.1% to 10%) relative to server rate
-        // Scale the adjustment within range based on actual desync amount
-        const maxAdjust = 0.10; // 10%
-        const minAdjust = 0.051; // 5.1%
-        const range = syncThresholdJump - syncThresholdLarge;
-        const normalizedDiff = Math.min(timeDiff - syncThresholdLarge, range);
-        const rateAdjust = minAdjust + (normalizedDiff / range) * (maxAdjust - minAdjust);
-        
-        if (direction === 'behind') {
-            // Too slow - speed up relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 + rateAdjust);
-        } else {
-            // Too fast - slow down relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 - rateAdjust);
-        }
-        console.log(`Large desync: ${timeDiff.toFixed(2)}s ${direction}. Server rate: ${serverPlaybackRate.toFixed(2)}x. Client rate: ${videoPlayer.playbackRate.toFixed(4)} (${(rateAdjust * 100).toFixed(2)}% adjustment)`);
-    } else if (timeDiff > syncThresholdModerate) {
-        // Moderate desync (1.6 to 3.0 seconds) - adjust playback rate (2.1% to 5%) relative to server rate
-        // Scale the adjustment within range based on actual desync amount
-        const maxAdjust = 0.05; // 5%
-        const minAdjust = 0.021; // 2.1%
-        const range = syncThresholdLarge - syncThresholdModerate;
-        const normalizedDiff = Math.min(timeDiff - syncThresholdModerate, range);
-        const rateAdjust = minAdjust + (normalizedDiff / range) * (maxAdjust - minAdjust);
-        
-        if (direction === 'behind') {
-            // Too slow - speed up relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 + rateAdjust);
-        } else {
-            // Too fast - slow down relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 - rateAdjust);
-        }
-        console.log(`Moderate desync: ${timeDiff.toFixed(2)}s ${direction}. Server rate: ${serverPlaybackRate.toFixed(2)}x. Client rate: ${videoPlayer.playbackRate.toFixed(4)} (${(rateAdjust * 100).toFixed(2)}% adjustment)`);
-    } else if (timeDiff > syncThresholdSmall) {
-        // Small desync (0.5 to 1.5 seconds) - adjust playback rate (0.1% to 2%) relative to server rate
-        // Scale the adjustment within range based on actual desync amount
-        const maxAdjust = 0.02; // 2%
-        const minAdjust = 0.001; // 0.1%
-        const range = syncThresholdModerate - syncThresholdSmall;
-        const normalizedDiff = Math.min(timeDiff - syncThresholdSmall, range);
-        const rateAdjust = minAdjust + (normalizedDiff / range) * (maxAdjust - minAdjust);
-        
-        if (direction === 'behind') {
-            // Too slow - speed up relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 + rateAdjust);
-        } else {
-            // Too fast - slow down relative to server
-            videoPlayer.playbackRate = serverPlaybackRate * (1 - rateAdjust);
-        }
-        console.log(`Small desync: ${timeDiff.toFixed(2)}s ${direction}. Server rate: ${serverPlaybackRate.toFixed(2)}x. Client rate: ${videoPlayer.playbackRate.toFixed(4)} (${(rateAdjust * 100).toFixed(2)}% adjustment)`);
-    } else {
-        // In sync (< 0.5 seconds) - match server's playback rate
-        videoPlayer.playbackRate = serverPlaybackRate;
-        if (serverPlaybackRate < 1.0) {
-            console.log(`In sync. Using server's slowed playback rate: ${serverPlaybackRate.toFixed(2)}x`);
-        }
-    }
-    
-    setTimeout(() => {
-        isAdjusting = false;
-    }, 100); // Small delay to prevent rapid adjustments
-    
-    updateTimeDisplay();
-}
-
-// Send control message to server
-function sendControlMessage(type, data = {}) {
-    if (!ws || ws.readyState !== WebSocket.OPEN || !isAuthenticated) {
-        setStatusMessage('Not connected to server', true);
-        return false;
-    }
-    
-    const message = { type, ...data };
-    ws.send(JSON.stringify(message));
-    return true;
-}
-
-// Start sending client time updates
-function startClientTimeUpdates() {
-    stopClientTimeUpdates(); // Clear any existing interval
-    console.log(`Starting client time updates every ${CLIENT_TIME_UPDATE_INTERVAL / 1000}s`);
-    
-    // Send an initial update immediately
-    sendTimeUpdate();
-    
-    // Set up interval for regular updates
-    clientTimeUpdateIntervalId = setInterval(sendTimeUpdate, CLIENT_TIME_UPDATE_INTERVAL);
-}
-
-// Function to send current time to server
-function sendTimeUpdate() {
-    // Only send if connected, authenticated, and video element exists
-    if (ws && ws.readyState === WebSocket.OPEN && isAuthenticated && videoPlayer) {
-        // Send current time even if video is not playing
-        const currentTime = videoPlayer.readyState > 0 && !isNaN(videoPlayer.currentTime) ? 
-            videoPlayer.currentTime : 0;
-            
-        sendControlMessage('clientTimeUpdate', { 
-            clientTime: currentTime,
-            name: userName // Send name with time updates
-        });
-    }
-}
-
-// Stop sending client time updates
-function stopClientTimeUpdates() {
-    if (clientTimeUpdateIntervalId) {
-        console.log('Stopping client time updates.');
-        clearInterval(clientTimeUpdateIntervalId);
-        clientTimeUpdateIntervalId = null;
-    }
-}
-
-// Request the viewer list from server (admin only)
-function requestViewerList() {
-    if (userRole !== 'admin') return;
-    
-    // Request immediately and then set interval
-    sendControlMessage('requestViewerList');
-    
-    // Set up regular updates every 5 seconds
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN && isAuthenticated) {
-            sendControlMessage('requestViewerList');
-        }
-    }, 5000);
-}
+// Remove requestViewerList function
+// function requestViewerList() { ... } // REMOVED (moved to ui.js / TBD)
 
 // Event Listeners
-passwordForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const password = passwordInput.value;
-    const name = usernameInput.value.trim();
-    
-    if (!password) {
-        authError.textContent = 'Please enter a password';
-        return;
-    }
-    
-    if (!name) {
-        authError.textContent = 'Please enter your name';
-        return;
-    }
-    
-    authError.textContent = '';
-    connectWebSocket(password, name);
-});
+// Remove passwordForm submit listener
+// passwordForm.addEventListener('submit', (e) => { ... }); // REMOVED (moved to auth.js)
 
 // Video time update event
-videoPlayer.addEventListener('timeupdate', () => {
-    updateTimeDisplay();
-});
+// videoPlayer.addEventListener('timeupdate', () => { ... }); // REMOVED (handled in DOMContentLoaded)
 
 // Only admin can manually control the video
-if (userRole === 'admin') {
-    // Custom play button
-    playBtn.addEventListener('click', () => {
-        if (sendControlMessage('play')) {
-            setStatusMessage('Play command sent');
-        }
-    });
-    
-    // Custom pause button
-    pauseBtn.addEventListener('click', () => {
-        if (sendControlMessage('pause')) {
-            setStatusMessage('Pause command sent');
-        }
-    });
-    
-    // Seek slider
-    seekSlider.addEventListener('input', () => {
-        isManuallyChangingTime = true;
-        const seekPercent = seekSlider.value / 100;
-        if (videoPlayer.duration) {
-            const seekTime = videoPlayer.duration * seekPercent;
-            timeDisplay.textContent = `${formatTime(seekTime)} / ${formatTime(videoPlayer.duration)}`;
-        }
-    });
-    
-    seekSlider.addEventListener('change', () => {
-        const seekPercent = seekSlider.value / 100;
-        if (videoPlayer.duration) {
-            const seekTime = videoPlayer.duration * seekPercent;
-            if (sendControlMessage('seek', { time: seekTime })) {
-                setStatusMessage(`Seeking to ${formatTime(seekTime)}`);
-            }
-        }
-        isManuallyChangingTime = false;
-    });
-    
-    // Video selection
-    videoList.addEventListener('change', () => {
-        const selectedVideo = videoList.value; // Value is "hls:streamName"
-        if (selectedVideo) {
-            // Send the hls: identifier directly
-            if (sendControlMessage('changeVideo', { video: selectedVideo })) {
-                setStatusMessage(`Requesting change to: ${selectedVideo.substring(4)}`);
-            }
-        }
-    });
-}
+// Remove admin control listeners (play/pause/seek/video selection)
+// if (userRole === 'admin') { ... } // REMOVED (partially moved to playback.js/ui.js)
 
 // Prevent viewers from directly controlling playback via native controls
-function preventViewerControls(event) {
-    if (userRole === 'viewer') {
-        console.log('Viewer action prevented:', event.type);
-        event.preventDefault(); // Stop the default action
-        // Optionally show a message
-        setStatusMessage('Viewers cannot control playback');
-        // Resync state immediately to correct any temporary UI flicker
-        if(ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'requestSync' })); // Assuming server handles this
-        }
-        return false;
-    }
-    return true;
-}
+// Remove preventViewerControls function
+// function preventViewerControls(event) { ... } // REMOVED (moved to playback.js)
 
-// Apply prevention listeners
-videoPlayer.addEventListener('play', preventViewerControls);
-videoPlayer.addEventListener('pause', (event) => {
-    // Allow pause if it's triggered by the sync logic (not directly by user)
-    if (!isAdjusting) {
-        preventViewerControls(event);
-    }
-});
-videoPlayer.addEventListener('seeking', preventViewerControls);
-videoPlayer.addEventListener('seeked', preventViewerControls);
-// We might need to intercept 'volumechange' as well if needed
-// videoPlayer.addEventListener('volumechange', preventViewerControls);
+// Remove prevention listeners
+// videoPlayer.addEventListener('play', preventViewerControls); ... // REMOVED
 
 // Initial setup on load
 window.addEventListener('DOMContentLoaded', async () => {
-    console.log('Page loaded, checking for saved session...');
+    window.logger = new LogManager(); // Make logger global
+
+    logger.info('DOM fully loaded and parsed.');
+    
+    // Add favicon link to prevent 404 errors
+    const faviconLink = document.createElement('link');
+    faviconLink.rel = 'icon';
+    faviconLink.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎬</text></svg>';
+    document.head.appendChild(faviconLink);
     
     // Hide both containers initially
     authContainer.classList.add('hidden');
@@ -822,109 +191,90 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Show a loading state
     document.body.classList.add('loading');
     
-    try {
-        // Try to auto-login with session token
+    // Try to auto-login with session token (uses functions from auth.js)
         const autoLoginSuccessful = await validateSession();
         
-        console.log('Auto-login result:', autoLoginSuccessful);
+    logger.debug('Auto-login result:', autoLoginSuccessful);
         
         if (!autoLoginSuccessful) {
             // Show auth form if no valid session
             authContainer.classList.remove('hidden');
-        }
-        // If auto-login was successful, the WebSocket connection will trigger UI updates
-    } catch (err) {
-        console.error('Error during auto-login:', err);
-        // Fallback to showing login form on error
-        authContainer.classList.remove('hidden');
-    } finally {
+        // Add listener for auth form submit (uses functions from auth.js)
+        passwordForm.addEventListener('submit', handleAuthFormSubmit);
+    } else {
+        // If auto-login succeeded, ws connection is already initiated
+        // UI updates (showing app container etc.) are handled in handleAuthSuccess (auth.js)
+    }
+
         // Remove loading state
         document.body.classList.remove('loading');
-    }
     
     // Set default video volume
     videoPlayer.volume = 0.5;
     
-    // Password form submit listener
-    passwordForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const password = passwordInput.value;
-        const name = usernameInput.value.trim();
-        authError.textContent = '';
-        
-        if (!password) {
-            authError.textContent = 'Please enter a password';
-            return;
-        }
-        
-        if (!name) {
-            authError.textContent = 'Please enter your name';
-            return;
-        }
-        
-        try {
-            connectWebSocket(password, name);
-        } catch (error) {
-            console.error('Connection error:', error);
-            authError.textContent = 'Failed to connect to server';
-        }
-    });
-    
-    // Logout button listener
-    logoutBtn.addEventListener('click', () => {
-        logout();
-        setStatusMessage('You have been logged out');
-    });
-    
-    // Video player time update
+    // Add Logout button listener (uses function from auth.js)
+    logoutBtn.addEventListener('click', handleLogout);
+
+    // Add Video player time update listener (calls function from ui.js)
     videoPlayer.addEventListener('timeupdate', updateTimeDisplay);
+
+    // Add Seek slider listeners (uses functions from playback.js & ui.js)
+    seekSlider.addEventListener('input', handleSeekInput);
+    seekSlider.addEventListener('change', handleSeekChange);
+
+    // Add Video selection change listener (uses functions from playback.js)
+    videoList.addEventListener('change', handleVideoSelectionChange);
+
+    // Add Prevention listeners (uses function from playback.js)
+    addViewerControlPreventionListeners();
+
+    // Add listener for manual play/unmute button (uses function from playback.js)
+    manualPlayBtn.addEventListener('click', handleManualPlay);
+
+    // Add listener for theater mode button (uses function from ui.js)
+    theaterModeBtn.addEventListener('click', toggleTheaterMode);
+
+    // Initialize smooth time updates (starts loop from ui.js)
+    // Note: This will only start updating *player* time initially.
+    // Server time and viewer times start updating after admin auth.
+    startSmoothTimeUpdates();
     
-    // Seek slider input
-    seekSlider.addEventListener('input', () => {
-        isManuallyChangingTime = true;
-        // Update time display while dragging
-        const seekTime = (seekSlider.value / 100) * videoPlayer.duration;
-        timeDisplay.textContent = `${formatTime(seekTime)} / ${formatTime(videoPlayer.duration)}`;
-    });
-    
-    // Seek slider change
-    seekSlider.addEventListener('change', () => {
-        // Only admins can seek
-        if (userRole === 'admin') {
-            const seekTime = (seekSlider.value / 100) * videoPlayer.duration;
-            sendControlMessage('seek', { time: seekTime });
-        }
-        isManuallyChangingTime = false;
-    });
-    
-    // Play button
-    playBtn.addEventListener('click', () => {
-        if (userRole === 'admin') {
-            sendControlMessage('play');
-        }
-    });
-    
-    // Pause button
-    pauseBtn.addEventListener('click', () => {
-        if (userRole === 'admin') {
-            sendControlMessage('pause');
-        }
-    });
-    
-    // Video selection change
-    videoList.addEventListener('change', () => {
-        // Only admins can change video
-        if (userRole === 'admin') {
-            const selectedHLSStream = videoList.value; // This should be the "hls:streamName"
-            if (selectedHLSStream) {
-                sendControlMessage('changeVideo', { video: selectedHLSStream });
+    // Add cleanup for smooth updates when the page is hidden/unloaded
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            logger.debug('Page hidden, stopping smooth updates.', 'ui');
+            stopSmoothTimeUpdates();
+            stopSmoothViewerTimeUpdates(); // Also stop viewer updates if running
+        } else {
+            logger.debug('Page visible, restarting smooth updates.', 'ui');
+            startSmoothTimeUpdates();
+            if (userRole === 'admin') {
+                startSmoothViewerTimeUpdates(); // Restart viewer updates only if admin
+                 }
             }
-        }
-    });
+        });
+
+    logger.info('Client-side initialization complete.');
 });
 
-// Add listener for theater mode button
-theaterModeBtn.addEventListener('click', () => {
-    document.body.classList.toggle('theater-mode');
-    // Optionally save state to localStorage if persistence is desired
-});
+// Remove theater mode button listener (handled in DOMContentLoaded)
+// theaterModeBtn.addEventListener('click', () => { ... });
+
+// Remove functions moved to ui.js
+// function showNotification(message, type = 'info') { ... }
+// function updateViewersTimeEstimates() { ... }
+// function redrawViewerTable() { ... }
+// function startSmoothViewerTimeUpdates() { ... }
+// function stopSmoothViewerTimeUpdates() { ... }
+
+// Handle viewer list update
+// function handleViewerList(message) { ... } // REMOVED (moved to ui.js)
+
+// Handle video list from server
+// function handleVideoList(message) { ... } // REMOVED (moved to ui.js)
+
+// Handle synchronization state from server
+// function handleSyncState(message) { ... } // REMOVED (moved to playback.js)
+
+// Enhanced synchronization logic
+// function synchronizeVideo(targetTime, isPlaying) { ... } // REMOVED (moved to playback.js)
