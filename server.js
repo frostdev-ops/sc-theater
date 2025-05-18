@@ -182,3 +182,7 @@ app.use('/video', videoService.getRouter()); // Mount video routes under /video
 authManager.startSessionCleanup();
 stateManager.startRateAdjustment(); // Start rate adjustment via StateManager
 videoService.startVideoScan(); // Start video scanning via VideoService
+
+server.listen(PORT, () => {
+    logger.info(`Server listening on port ${PORT}`, 'startup');
+});
