@@ -527,8 +527,7 @@ body.theater-mode #app-container {
 
 body.theater-mode .header {
     /* Optionally hide header or make smaller in theater mode */
-    /* padding-bottom: 0.5rem;
-    margin-bottom: 0.5rem; */
+    opacity: 0.8; /* Adding a property to avoid empty ruleset */
 }
 
 body.theater-mode .controls {
@@ -586,12 +585,33 @@ body.theater-mode .controls {
     align-items: center;
 }
 
-#viewer-count {
+#viewer-count-container {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background-color: var(--secondary-start);
     color: var(--bg-color);
-    border-radius: 12px;
-    padding: 2px 8px;
-    font-size: 0.8rem;
+    border-radius: 50px;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 10px;
+    margin-left: 10px;
+    transition: transform 0.2s ease, background-color 0.3s ease;
+}
+
+.pulse-animation {
+    animation: pulse 0.5s ease-in-out;
+    background-color: var(--accent-color) !important;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+
+#viewer-count {
+    font-size: 0.9rem;
     font-weight: bold;
 }
 

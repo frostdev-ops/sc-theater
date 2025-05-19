@@ -414,9 +414,29 @@ function updateViewersTimeEstimates() {
 // Update the viewer count display (Admin only)
 function updateViewerCount() {
     if (!viewerCount || userRole !== 'admin') return;
-
-    const viewerOnlyCount = Array.from(viewerTimeEstimates.values()).filter(v => v.role === 'viewer').length;
-    viewerCount.textContent = viewerOnlyCount.toString();
+    
+    // Count all connected users including admin
+    // Get all viewers from the estimates map
+    const allViewersCount = Array.from(viewerTimeEstimates.values()).length;
+    
+    // Update the counter display with animation
+    const currentCount = parseInt(viewerCount.textContent || '0');
+    if (currentCount !== allViewersCount) {
+        // Add a subtle animation effect
+        const countContainer = document.getElementById('viewer-count-container');
+        if (countContainer) {
+            countContainer.classList.add('pulse-animation');
+            setTimeout(() => {
+                countContainer.classList.remove('pulse-animation');
+            }, 1000);
+        }
+        
+        // Update the count
+        viewerCount.textContent = allViewersCount.toString();
+        
+        // Log for debugging
+        logger.debug(`Updated viewer count to ${allViewersCount} (includes admin)`, 'admin');
+    }
 }
 
 // Start the smooth viewer time update loop (Admin only)
