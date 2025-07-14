@@ -83,6 +83,7 @@ function handleAuthSuccess(message) {
     userRole = message.role;
     userName = message.name || getCookie('userName') || `User_${Date.now().toString().slice(-4)}`; // Assign name if needed
     sessionToken = message.token;
+    clientId = message.clientId; // Store the client ID
 
     logger.debug(`[Auth Success] Updating UI and storing session.`, 'auth');
     roleText.textContent = `${userName} (${userRole})`;

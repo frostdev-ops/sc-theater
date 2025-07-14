@@ -14,6 +14,7 @@ const AuthManager = require('./lib/auth-server'); // Import AuthManager
 const StateManager = require('./lib/state-manager'); // Import StateManager
 const VideoService = require('./lib/video-service'); // Import VideoService
 const WebSocketServer = require('./lib/websocket-server'); // Import WebSocketServer
+const { initializeGracefulShutdown } = require('./lib/utils-server');
 
 const PORT = process.env.PORT || 4000;
 // Session expiry is now handled within AuthManager based on env var or default
